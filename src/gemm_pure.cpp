@@ -1,5 +1,10 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <omp.h>
+
+#include <sys/time.h>
+#include <unistd.h>
+// gettimeofday()
 
 #include <iostream>
 // printMat
@@ -192,14 +197,34 @@ bool CopyInput(float *matA, float *matB, float *matC, aclFloat16 alpha, aclFloat
 
     INFO_LOG("set alpha and beta success");
 
+    INFO_LOG("%f", matA[5000 * 512]);
+
     // matA -> hostMatrix
-    for (int i = 0; i < 16; i++)
+#pragma omp parallel for
+    for (int i = 0; i < m_; i++)
     {
-        for (int j = 0; j < 16; j++)
+        for (int j = 0; j < k_; j++)
         {
-            reinterpret_cast<aclFloat16 *>(hostMatrixA_)[i * 16 + j] = aclFloatToFloat16(matA[i * 16 + j]);
-            reinterpret_cast<aclFloat16 *>(hostMatrixB_)[i * 16 + j] = aclFloatToFloat16(matB[i * 16 + j]);
-            reinterpret_cast<aclFloat16 *>(hostMatrixC_)[i * 16 + j] = aclFloatToFloat16(matC[i * 16 + j]);
+            reinterpret_cast<aclFloat16 *>(hostMatrixA_)[i * k_ + j] = aclFloatToFloat16(matA[i * k_ + j]);
+        }
+        // INFO_LOG("%d,%d",i,i*k_);
+    }
+    INFO_LOG("matA -> hostMatrix success");
+
+#pragma omp parallel for
+    for (int i = 0; i < k_; i++)
+    {
+        for (int j = 0; j < n_; j++)
+        {
+            reinterpret_cast<aclFloat16 *>(hostMatrixB_)[i * n_ + j] = aclFloatToFloat16(matB[i * n_ + j]);
+        }
+    }
+#pragma omp parallel for
+    for (int i = 0; i < m_; i++)
+    {
+        for (int j = 0; j < n_; j++)
+        {
+            reinterpret_cast<aclFloat16 *>(hostMatrixC_)[i * n_ + j] = aclFloatToFloat16(matC[i * n_ + j]);
         }
     }
     INFO_LOG("mat2host success");
@@ -372,32 +397,60 @@ bool CopyOutput()
 
 void GenData(float **matA, float **matB, float **matC)
 {
-    *matA = (float *)malloc(16 * 16 * sizeof(float));
-    *matB = (float *)malloc(16 * 16 * sizeof(float));
-    *matC = (float *)malloc(16 * 16 * sizeof(float));
+    *matA = (float *)malloc(m_ * k_ * sizeof(float));
+    *matB = (float *)malloc(k_ * n_ * sizeof(float));
+    *matC = (float *)malloc(m_ * n_ * sizeof(float));
 
-    for (int i = 0; i < 16; i++)
+    if (*matA == nullptr && *matB == nullptr && *matC == nullptr)
     {
-        for (int j = 0; j < 16; j++)
+        ERROR_LOG("malloc failed");
+    }
+
+#pragma omp parallel for
+    for (int i = 0; i < m_; i++)
+    {
+        for (int j = 0; j < k_; j++)
         {
-            (*matA)[i * 16 + j] = 1;
-            (*matB)[i * 16 + j] = 1;
-            (*matC)[i * 16 + j] = 1;
+            (*matA)[i * k_ + j] = 1;
+        }
+    }
+    std::cout << m_ << k_ << n_ << std::endl;
+    INFO_LOG("%d,%d,%d", m_, k_, n_);
+    INFO_LOG("%f", (*matA)[5000 * 512]);
+
+#pragma omp parallel for
+    for (int i = 0; i < k_; i++)
+    {
+        for (int j = 0; j < n_; j++)
+        {
+            (*matB)[i * n_ + j] = 1;
+        }
+    }
+#pragma omp parallel for
+    for (int i = 0; i < m_; i++)
+    {
+        for (int j = 0; j < n_; j++)
+        {
+            (*matC)[i * n_ + j] = 1;
         }
     }
 }
 
 int main()
 {
-    int m = 16;
-    int n = 16;
-    int k = 16;
-    float alpha = 2.0;
-    float beta = 1.0;
+    int m = 10240;
+    int k = 512;
+    int n = 512;
+    float alpha = 1.0;
+    float beta = 0.0;
     float *matA = nullptr;
     float *matB = nullptr;
     float *matC = nullptr;
     // C = alpha * AB + beta * C
+
+    m_ = m;
+    n_ = n;
+    k_ = k;
 
     GenData(&matA, &matB, &matC);
 
@@ -440,11 +493,16 @@ int main()
     INFO_LOG("Gemm execution success");
     DoPrintMatrixFp16(reinterpret_cast<const aclFloat16 *>(devMatrixC_), 6, 6);
 
+    struct timeval tv_start, tv_end;
+    gettimeofday(&tv_start, NULL);
     if (!RunGemmSync())
     {
         ERROR_LOG("Gemm execution failed");
         return FAILED;
     }
+    gettimeofday(&tv_end, NULL);
+    INFO_LOG("GEMM Time: %fms", (tv_end.tv_sec - tv_start.tv_sec) * 1000.0 + (tv_end.tv_usec - tv_start.tv_usec) / 1000.0);
+
     INFO_LOG("Gemm execution success");
     DoPrintMatrixFp16(reinterpret_cast<const aclFloat16 *>(devMatrixC_), 6, 6);
 
