@@ -1,0 +1,1 @@
+/usr/bin/g++ CMakeFiles/execute_gemm_op.dir/gemm_pure.cpp.o -o /home/HwHiAiUser/gemm/run/out/execute_gemm_op   -L/home/HwHiAiUser/Ascend/ascend-toolkit/latest/arm64-linux/acllib/lib64/stub  -lascendcl -lacl_cblas -lstdc++ 
